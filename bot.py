@@ -17,8 +17,8 @@ ACCESS_ROLE_ID = 1381010515584618536
 CATEGORY_ARCHIVE_ID = 1433080596179193999
 RESTRICTED_ROLE_ID = 1433065303046361119
 
-MAIN_EMBED_IMAGE_URL = "https://i.pinimg.com/736x/f6/59/fc/f659fc0c84bb73da6aae312b453db539.jpg"
-LOCAL_PROOF_IMAGE_PATH = "C:\\Users\\neverplayattack\\IdeaProjects\\miamihelper\\dadsad.png"
+MAIN_EMBED_IMAGE_URL = "0.jpg"
+LOCAL_PROOF_IMAGE_PATH = "dadsad.png"
 
 # НОВЫЕ НАСТРОЙКИ ДЛЯ СООБЩЕНИЯ О РЕДУКСЕ
 REDUX_CHANNEL_ID = 1431721606039867515
@@ -335,6 +335,7 @@ async def on_ready():
                 print("Отправлено новое сообщение о Redux.")
             except Exception as e:
                 print(f"Ошибка при отправке сообщения в канал Redux: {e}")
+
 
 
 bot.run(TOKEN)
