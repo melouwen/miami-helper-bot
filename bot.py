@@ -72,10 +72,13 @@ class ProofActionsView(discord.ui.View):
         # ID владельца ветки (пользователь, который подал пруф)
         # Ветка создается как канал с именем типа 'proof-user-id'
         try:
+            # Ищем ID пользователя из имени канала
             user_id = int(interaction.channel.name.split('-')[-1])
+            # Получаем объект Member
             member = interaction.guild.get_member(user_id)
         except Exception:
-            return await interaction.response.send_message("Не удалось определить владельца ветки.", ephemeral=True)
+            # Если не удалось найти ID или Member, выводим ошибку
+            return await interaction.response.send_message("Не удалось определить владельца ветки. Возможно, ветка была создана вручную.", ephemeral=True)
 
         if member:
             access_role = interaction.guild.get_role(ACCESS_ROLE_ID)
@@ -108,14 +111,28 @@ class ProofActionsView(discord.ui.View):
         restricted_role = interaction.guild.get_role(RESTRICTED_ROLE_ID)
 
         if archive_category and restricted_role:
-            # Сначала перемещаем
+            # Убеждаемся, что мы отвечаем на взаимодействие перед тем как удалять кнопки
+            if interaction.response.is_done():
+                # Если уже ответили (например, выдачей роли), просто редактируем сообщение
+                # Нам нужно найти сообщение, на котором были кнопки (первое сообщение в ветке)
+                try:
+                    first_message = [msg async for msg in interaction.channel.history(limit=1, oldest_first=True)][0]
+                    await first_message.edit(view=None) # Удаляем кнопки
+                except Exception:
+                    # Если не удалось найти/отредактировать, просто продолжаем
+                    pass
+            else:
+                # Если это первое взаимодействие (например, просто "Закрыть ветку"), отвечаем и удаляем кнопки
+                await interaction.response.edit_message(view=None)
+
+            # Перемещаем
             await interaction.channel.edit(category=archive_category)
-            # Убираем права на просмотр у всех, кроме определенных ролей
+
+            # Настраиваем права доступа в архиве
             await interaction.channel.set_permissions(
                 interaction.guild.default_role,
                 read_messages=False
             )
-            # Добавляем права для модераторов/админов
             await interaction.channel.set_permissions(
                 interaction.guild.get_role(OWN_ROLE_ID),
                 read_messages=True,
@@ -130,10 +147,8 @@ class ProofActionsView(discord.ui.View):
                 restricted_role,
                 read_messages=False
             )
-            # Архивируем (устанавливаем статус archive)
-            if interaction.channel.type == discord.ChannelType.text:
-                await interaction.response.edit_message(view=None) # Удаляем кнопки
-                await interaction.channel.send("Ветка перемещена в архив и закрыта для новых сообщений.")
+            # Отправляем сообщение об архивации, так как edit_message мог быть вызван ранее
+            await interaction.channel.send("Ветка перемещена в архив и закрыта для новых сообщений.")
         else:
             await interaction.channel.send("Ошибка при архивации: Не найдена категория архива или роль ограничений.")
 
@@ -152,6 +167,9 @@ class ProofButtonView(discord.ui.View):
 
         # Проверяем, есть ли уже открытая ветка для этого пользователя
         existing_thread_name = f"proof-{interaction.user.id}"
+        
+        # NOTE: Поиск по имени канала может быть медленным для больших серверов. 
+        # Но для данной задачи это достаточно надежный способ.
         for channel in category.channels:
             if channel.name == existing_thread_name:
                 return await interaction.response.send_message(f"У вас уже есть открытая ветка для пруфа: {channel.mention}", ephemeral=True)
@@ -219,19 +237,32 @@ async def on_ready():
     print(f'{bot.user.name} успешно подключился к Discord!')
 
     # Регистрация всех постоянных (persistent) View
+    # ЭТО КРИТИЧЕСКИ ВАЖНО для работы КНОПОК после перезапуска
     bot.add_view(ProofButtonView())
     bot.add_view(ProofActionsView())
 
-    # Единоразовая отправка сообщения с кнопкой "Подать пруф" (если канала нет, бот пропустит)
-    try:
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel and channel.last_message_id is None: # Проверяем, что канал пуст, чтобы не спамить
-            await channel.send("Нажмите кнопку, чтобы подать пруф для получения доступа:", view=ProofButtonView())
-    except Exception as e:
-        print(f"Ошибка при отправке начального сообщения: {e}")
+    # УДАЛЕНИЕ: УБРАНА НЕНАДЕЖНАЯ ПРОВЕРКА И АВТОМАТИЧЕСКАЯ ОТПРАВКА СООБЩЕНИЯ
 
     # Запускаем отправку Redux сообщения
     bot.loop.create_task(send_redux_announcement())
+
+
+# НОВАЯ КОМАНДА для ручной отправки кнопки
+@bot.command(name="send_proof_button")
+async def send_proof_button_command(ctx):
+    """Отправляет сообщение с кнопкой 'Подать пруф' в канал, указанный в CHANNEL_ID."""
+    # Проверяем, что команду вызывает администратор
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("У вас нет прав для выполнения этой команды.", delete_after=5)
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        # Отправляем новое сообщение с кнопкой
+        await channel.send("Нажмите кнопку, чтобы подать пруф для получения доступа:", view=ProofButtonView())
+        await ctx.send(f"✅ Сообщение с кнопкой успешно отправлено в {channel.mention}.", delete_after=10)
+    else:
+        await ctx.send(f"❌ Ошибка: Канал с ID {CHANNEL_ID} не найден. Проверьте настройки.", delete_after=10)
 
 
 # Функция для отправки анонса Redux
@@ -290,8 +321,11 @@ async def send_redux_announcement():
 
             # Если сообщение уже есть, редактируем его. Иначе — отправляем новое.
             if last_message:
-                await last_message.edit(embed=embed, attachments=[redux_file] if redux_file else [])
+                # Если файл не был найден, просто редактируем без вложений (attachments)
+                attachments = [redux_file] if redux_file else []
+                await last_message.edit(embed=embed, attachments=attachments)
             else:
+                # Отправляем новое сообщение
                 await redux_channel.send(
                     embed=embed,
                     file=redux_file if redux_file else discord.utils.MISSING,
