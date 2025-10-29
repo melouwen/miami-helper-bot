@@ -52,7 +52,7 @@ async def _archive_channel(channel: discord.TextChannel, guild: discord.Guild, i
 
     try:
         await channel.edit(
-            category=archive_category,
+            category=archive_category,ф
             overwrites=overwrites,
             name=f"архив-{channel.name.replace('пруф-', '')}"
         )
@@ -339,3 +339,4 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
